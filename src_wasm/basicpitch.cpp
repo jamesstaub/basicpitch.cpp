@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <emscripten.h>
 #include <iostream>
 #include <libremidi/libremidi.hpp>
@@ -54,5 +55,10 @@ extern "C"
             *midi_size = 0;
             return;
         }
+
+        // Copy the MIDI data into the allocated memory
+        memcpy(*midi_data_ptr, midiBytes.data(), *midi_size);
+        
+        callWriteWasmLog("MIDI data copied to WASM memory successfully.");
     }
 }

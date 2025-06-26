@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIDI File Inspector</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .inspector {
+            border: 1px solid #ccc;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .hex-dump {
+            font-family: monospace;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+            white-space: pre;
+        }
+        .midi-info {
+            background: #e8f4f8;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 10px 0;
+        }
+        .error {
+            background: #ffe6e6;
+            color: #d00;
+            padding: 10px;
+            border-radius: 3px;
+        }
+        .success {
+            background: #e6ffe6;
+            color: #060;
+            padding: 10px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h1>MIDI File Inspector</h1>
+    
+    <div class="inspector">
+        <h2>Upload MIDI File</h2>
+        <input type="file" id="midi-upload" accept=".mid,.midi">
+        <button id="inspect-btn">Inspect MIDI File</button>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        const fileInput = document.getElementById('midi-upload');
+        const inspectBtn = document.getElementById('inspect-btn');
+        const resultsDiv = document.getElementById('results');
+
+        function bytesToHex(bytes) {
+            return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join(' ');
+        }
+
+        function bytesToString(bytes) {
+            return Array.from(bytes, byte => 
+                byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'
+            ).join('');
+        }
+
+        function createHexDump(data, maxBytes = 512) {
+            const bytes = new Uint8Array(data);
+            const displayBytes = bytes.slice(0, maxBytes);
+            let output = '';
+            
+            for (let i = 0; i < displayBytes.length; i += 16) {
+                const offset = i.toString(16).padStart(8, '0');
+                const chunk = displayBytes.slice(i, i + 16);
+                const hex = bytesToHex(chunk).padEnd(47, ' ');
+                const ascii = bytesToString(chunk);
+                output += `${offset}: ${hex} |${ascii}|\n`;
+            }
+            
+            if (bytes.length > maxBytes) {
+                output += `\n... (showing first ${maxBytes} of ${bytes.length} bytes)`;
+            }
+            
+            return output;
+        }
+
+        function parseMIDIHeader(data) {
+            const view = new DataView(data);
+            const header = {};
+            
+            try {
+                // Check for MThd header
+                const headerChunk = String.fromCharCode(
+                    view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3)
+                );
+                
+                if (headerChunk !== 'MThd') {
+                    throw new Error(`Invalid MIDI header. Expected 'MThd', got '${headerChunk}'`);
+                }
+                
+                header.headerChunk = headerChunk;
+                header.headerLength = view.getUint32(4);
+                header.format = view.getUint16(8);
+                header.numTracks = view.getUint16(10);
+                header.division = view.getUint16(12);
+                
+                // Parse division
+                if (header.division & 0x8000) {
+                    // SMPTE format
+                    const smpteFormat = (header.division >> 8) & 0x7F;
+                    const ticksPerFrame = header.division & 0xFF;
+                    header.timingFormat = 'SMPTE';
+                    header.smpteFormat = smpteFormat;
+                    header.ticksPerFrame = ticksPerFrame;
+                } else {
+                    // Ticks per quarter note
+                    header.timingFormat = 'Ticks per quarter note';
+                    header.ticksPerQuarterNote = header.division;
+                }
+                
+                return header;
+            } catch (error) {
+                throw new Error(`Failed to parse MIDI header: ${error.message}`);
+            }
+        }
+
+        function findTracks(data) {
+            const view = new DataView(data);
+            const tracks = [];
+            let offset = 14; // Start after header
+            
+            while (offset < data.byteLength - 8) {
+                try {
+                    const trackChunk = String.fromCharCode(
+                        view.getUint8(offset), view.getUint8(offset + 1),
+                        view.getUint8(offset + 2), view.getUint8(offset + 3)
+                    );
+                    
+                    if (trackChunk === 'MTrk') {
+                        const trackLength = view.getUint32(offset + 4);
+                        tracks.push({
+                            offset: offset,
+                            length: trackLength,
+                            dataStart: offset + 8,
+                            dataEnd: offset + 8 + trackLength
+                        });
+                        offset += 8 + trackLength;
+                    } else {
+                        offset++;
+                    }
+                } catch (error) {
+                    break;
+                }
+            }
+            
+            return tracks;
+        }
+
+        function inspectMIDI(file) {
+            const reader = new FileReader();
+            
+            reader.onload = function(event) {
+                const data = event.target.result;
+                const fileSize = data.byteLength;
+                
+                let html = `<div class="inspector">`;
+                html += `<h2>File Information</h2>`;
+                html += `<p><strong>Filename:</strong> ${file.name}</p>`;
+                html += `<p><strong>File Size:</strong> ${fileSize} bytes</p>`;
+                
+                try {
+                    // Parse MIDI header
+                    const header = parseMIDIHeader(data);
+                    html += `<div class="success">✓ Valid MIDI file detected</div>`;
+                    html += `<div class="midi-info">`;
+                    html += `<h3>MIDI Header Information</h3>`;
+                    html += `<p><strong>Header Chunk:</strong> ${header.headerChunk}</p>`;
+                    html += `<p><strong>Header Length:</strong> ${header.headerLength} bytes</p>`;
+                    html += `<p><strong>Format:</strong> ${header.format} (${header.format === 0 ? 'Single track' : header.format === 1 ? 'Multiple tracks, synchronous' : 'Multiple tracks, asynchronous'})</p>`;
+                    html += `<p><strong>Number of Tracks:</strong> ${header.numTracks}</p>`;
+                    html += `<p><strong>Timing Format:</strong> ${header.timingFormat}</p>`;
+                    if (header.ticksPerQuarterNote) {
+                        html += `<p><strong>Ticks per Quarter Note:</strong> ${header.ticksPerQuarterNote}</p>`;
+                    }
+                    html += `</div>`;
+                    
+                    // Find tracks
+                    const tracks = findTracks(data);
+                    html += `<div class="midi-info">`;
+                    html += `<h3>Track Information</h3>`;
+                    html += `<p><strong>Tracks Found:</strong> ${tracks.length}</p>`;
+                    tracks.forEach((track, index) => {
+                        html += `<p><strong>Track ${index + 1}:</strong> ${track.length} bytes (offset: ${track.offset})</p>`;
+                    });
+                    html += `</div>`;
+                    
+                    if (tracks.length !== header.numTracks) {
+                        html += `<div class="error">⚠ Warning: Header says ${header.numTracks} tracks, but found ${tracks.length}</div>`;
+                    }
+                    
+                } catch (error) {
+                    html += `<div class="error">✗ Error parsing MIDI file: ${error.message}</div>`;
+                }
+                
+                // Hex dump
+                html += `<h3>Raw Data (Hex Dump)</h3>`;
+                html += `<div class="hex-dump">${createHexDump(data)}</div>`;
+                html += `</div>`;
+                
+                resultsDiv.innerHTML = html;
+            };
+            
+            reader.readAsArrayBuffer(file);
+        }
+
+        inspectBtn.addEventListener('click', function() {
+            const file = fileInput.files[0];
+            if (file) {
+                inspectMIDI(file);
+            } else {
+                resultsDiv.innerHTML = '<div class="error">Please select a MIDI file first</div>';
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-EMSDK_ENV_PATH?=/home/sevagh/repos/emsdk/emsdk_env.sh
+EMSDK_ENV_PATH?=./emsdk/emsdk_env.sh
 
 default: cli
 

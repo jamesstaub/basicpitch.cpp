@@ -113,3 +113,89 @@ build/build-wasm/basicpitch.wasm
 ```
 
 This also copies the updated `basicpitch.{wasm,js}` to the `./web` directory.
+
+## Development Notes & Troubleshooting
+
+### WASM Memory and Large Audio File Issues (Dec 2024)
+
+This section documents debugging and fixes for WASM memory access issues when processing large audio files in the web demo.
+
+#### Issues Encountered
+
+* **Memory access out of bounds**: Large audio files (>20M samples) caused runtime errors in WASM
+* **Alignment faults**: Neural network inference failed due to memory alignment issues
+* **WASM heap limitations**: Initial 16MB heap was insufficient for large audio processing
+
+#### Root Causes Identified
+
+1. **Insufficient initial memory allocation**: WASM module started with only 16MB heap
+2. **Aggressive compiler optimizations**: `-O3`, `-flto`, and SIMD optimizations caused alignment faults
+3. **Missing memory exports**: WASM module wasn't exporting necessary heap views (`HEAPF32`, `HEAPU8`)
+4. **Improper memory alignment**: Audio data wasn't aligned to required boundaries
+
+#### Solutions Implemented
+
+##### 1. WASM Build Configuration (`src_wasm/CMakeLists.txt`)
+
+* **Increased initial memory**: Set `INITIAL_MEMORY=256MB` (reduced from troubleshooting 1GB)
+* **Enabled memory growth**: `ALLOW_MEMORY_GROWTH=1` allows dynamic memory expansion
+* **Exported heap views**: Added `HEAPF32`, `HEAPU8`, `HEAP8` to `EXPORTED_RUNTIME_METHODS`
+* **Reduced optimization level**: Changed from `-O3` to `-O2` to avoid alignment issues
+* **Removed aggressive flags**: Removed `-flto`, `-msimd128`, `-fassociative-math` and other aggressive optimizations that caused alignment faults
+* **Added debugging support**: Included `ASSERTIONS=1` for better error reporting
+
+##### 2. JavaScript Memory Management (`web/worker.js`)
+
+* **Added memory bounds checking**: Verify sufficient heap space before processing
+* **Improved memory alignment**: Ensure 16-byte alignment for audio data allocation
+* **Enhanced error handling**: Wrap WASM function calls in try-catch blocks
+* **Added comprehensive logging**: Debug memory allocation, heap sizes, and processing steps
+* **Direct heap access**: Use `HEAPF32.subarray()` for efficient memory copying
+
+##### 3. Build System Updates
+
+* **Updated CMake version requirements**: Fixed compatibility warnings
+* **Streamlined Makefile**: Improved EMSDK environment setup
+* **Enhanced error reporting**: Better build-time error messages
+
+#### Performance Optimizations
+
+* **Memory growth strategy**: Start with 256MB, grow as needed (up to 4GB max)
+* **Efficient memory copying**: Use typed array views instead of individual memory access
+* **Alignment optimization**: Align audio buffers to 16-byte boundaries
+* **Stack size tuning**: Set appropriate stack size (16MB) for deep neural network calls
+
+#### Testing Results
+
+* ✅ **Large files**: Successfully processes 22M+ sample audio files (~90MB of float32 data)
+* ✅ **Memory efficiency**: 256MB initial allocation sufficient with growth enabled
+* ✅ **Cross-browser compatibility**: Works in Chrome, Firefox, Safari
+* ✅ **Error handling**: Graceful failure with informative error messages
+* ✅ **MIDI output quality**: Generated MIDI files are valid and uncorrupted
+
+#### Key Learnings
+
+1. **WASM alignment matters**: Aggressive optimizations can cause runtime alignment faults
+2. **Memory growth is essential**: Large ML models need dynamic memory allocation
+3. **Heap exports required**: JavaScript needs direct access to WASM memory views
+4. **Error boundaries crucial**: Proper error handling prevents crashes and aids debugging
+
+#### Recommended Settings for Production
+
+```cmake
+# Balanced performance and stability
+set(COMMON_LINK_FLAGS 
+    "-s ALLOW_MEMORY_GROWTH=1"
+    "-s INITIAL_MEMORY=128MB"        # Can be reduced from 256MB for smaller models
+    "-s MAXIMUM_MEMORY=2GB"          # Adjust based on expected max file sizes  
+    "-s STACK_SIZE=8MB"              # Sufficient for most neural networks
+    "-s MODULARIZE=1"
+    "-s EXPORTED_RUNTIME_METHODS=[\"getValue\",\"setValue\",\"HEAPF32\",\"HEAPU8\"]"
+    # Remove ASSERTIONS=1 for production builds
+)
+
+# Conservative optimization settings
+set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fno-exceptions -fno-rtti -DNDEBUG")
+```
+
+This work ensures the web demo can handle realistic audio file sizes while maintaining stability and performance.

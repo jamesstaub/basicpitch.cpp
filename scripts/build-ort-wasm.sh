@@ -2,7 +2,7 @@
 
 # copied from https://github.com/olilarkin/ort-builder
 
-python ./vendor/onnxruntime/tools/ci_build/build.py \
+python3 ./vendor/onnxruntime/tools/ci_build/build.py \
 --build_dir ./build/build-ort-wasm \
 --config=MinSizeRel \
 --build_wasm_static_lib \

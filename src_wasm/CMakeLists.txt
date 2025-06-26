@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.5)
 
 project(basicpitch.cpp)
 enable_testing()
@@ -8,7 +8,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(CMAKE_CXX_FLAGS "-Wall -Wextra")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -msimd128 -msse4.2 -flto -fno-exceptions -fno-math-errno -fno-trapping-math -fassociative-math -freciprocal-math -fno-rtti -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fno-exceptions -fno-rtti -DNDEBUG")
 
 # Set some libremidi flags for wasm and header-only
 add_definitions(-DLIBREMIDI_HEADER_ONLY=1 -DLIBREMIDI_EMSCRIPTEN=1)
@@ -26,7 +26,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../ort-model/model)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../src)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/eigen)
 
-set(COMMON_LINK_FLAGS "-flto -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=4GB -s STACK_SIZE=5MB -s MODULARIZE=1 -s 'EXPORTED_RUNTIME_METHODS=[\"FS\"]'")
+set(COMMON_LINK_FLAGS "-s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=256MB -s MAXIMUM_MEMORY=4GB -s STACK_SIZE=16MB -s MODULARIZE=1 -s 'EXPORTED_RUNTIME_METHODS=[\"FS\",\"getValue\",\"setValue\",\"HEAPF32\",\"HEAP8\",\"HEAPU8\",\"wasmMemory\"]' -s ERROR_ON_UNDEFINED_SYMBOLS=0 -s ASSERTIONS=1")
 
 file(GLOB SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../src_wasm/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../ort-model/model/model.ort.c")
 add_executable(basicpitch ${SOURCES})
@@ -38,7 +38,7 @@ target_include_directories(basicpitch SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(basicpitch ${ONNX_RUNTIME_WASM_LIB})
 target_compile_definitions(basicpitch PRIVATE LIBREMIDI_HEADER_ONLY=1 LIBREMIDI_EMSCRIPTEN=1)
 set_target_properties(basicpitch PROPERTIES
-    LINK_FLAGS "${COMMON_LINK_FLAGS} -s EXPORT_NAME='libbasicpitch' -s EXPORTED_RUNTIME_METHODS=['getValue'] -s EXPORTED_FUNCTIONS=\"['_malloc', '_free', '_convertToMidi']\""
+    LINK_FLAGS "${COMMON_LINK_FLAGS} -s EXPORT_NAME='libbasicpitch' -s EXPORTED_RUNTIME_METHODS='[\"getValue\",\"setValue\",\"HEAPF32\",\"HEAP8\",\"HEAPU8\"]' -s EXPORTED_FUNCTIONS=\"['_malloc', '_free', '_convertToMidi']\""
 )
 
 # Custom command to copy the basicpitch.js and basicpitch.wasm files to the ./web directory
