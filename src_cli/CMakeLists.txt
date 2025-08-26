@@ -14,10 +14,15 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -ffast-math -flto -fno-signed-zer
 add_definitions(-DLIBREMIDI_HEADER_ONLY=1)
 #add_definitions(-DORT_NO_EXCEPTIONS=1)
 
-# Define the path to the compiled ONNX Runtime static library
-set(ONNX_RUNTIME_LIB ${CMAKE_SOURCE_DIR}/../build/build-ort-linux/MinSizeRel/libonnxruntime.dylib)
+# Use system-installed ONNX Runtime from Homebrew
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ONNX_RUNTIME REQUIRED libonnxruntime)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/onnxruntime/include)
+# Alternative approach using the CMake config
+# find_package(onnxruntime REQUIRED PATHS /opt/homebrew/lib/cmake/onnxruntime)
+
+include_directories(${ONNX_RUNTIME_INCLUDE_DIRS})
+link_directories(${ONNX_RUNTIME_LIBRARY_DIRS})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../ort-model/model)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../src)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/eigen)
@@ -26,15 +31,22 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/libnyquist/include)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/libnyquist libnyquist)
 
-file(GLOB SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../src_cli/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../ort-model/model/model.ort.c" "${CMAKE_CURRENT_SOURCE_DIR}/../vendor/oboe-resampler/*.cpp")
+file(GLOB SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../src_cli/basicpitch.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../ort-model/model/model.ort.c" "${CMAKE_CURRENT_SOURCE_DIR}/../vendor/oboe-resampler/*.cpp")
 add_executable(basicpitch ${SOURCES})
+
+# Add daemon version
+file(GLOB DAEMON_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../src_cli/basicpitch_daemon.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../ort-model/model/model.ort.c" "${CMAKE_CURRENT_SOURCE_DIR}/../vendor/oboe-resampler/*.cpp")
+add_executable(basicpitch_daemon ${DAEMON_SOURCES})
 
 # we only need header mode for libremidi
 # use target_include_directories to treat it like a system library to  ignore warnings
 target_include_directories(basicpitch SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/libremidi/include)
+target_include_directories(basicpitch_daemon SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/libremidi/include)
 
-target_link_libraries(basicpitch ${ONNX_RUNTIME_LIB} libnyquist)
+target_link_libraries(basicpitch ${ONNX_RUNTIME_LIBRARIES} libnyquist)
+target_link_libraries(basicpitch_daemon ${ONNX_RUNTIME_LIBRARIES} libnyquist)
 target_compile_definitions(basicpitch PRIVATE LIBREMIDI_HEADER_ONLY=1)
+target_compile_definitions(basicpitch_daemon PRIVATE LIBREMIDI_HEADER_ONLY=1)
 
 file(GLOB SOURCES_TO_LINT "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../src/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/../src_wasm/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/../src_cli/*.cpp")
 

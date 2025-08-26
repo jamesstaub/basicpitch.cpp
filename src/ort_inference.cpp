@@ -1,5 +1,5 @@
 #include <Eigen/Dense>
-#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
+#include <onnxruntime_cxx_api.h>
 #include <unsupported/Eigen/CXX11/Tensor>
 
 // this is the nmp model baked into a header file
@@ -58,8 +58,8 @@ basic_pitch::ort_inference(const std::vector<float> &mono_audio)
 basic_pitch::InferenceResult basic_pitch::ort_inference(const float *mono_audio,
                                                         int length)
 {
-    // Initialize ONNX Runtime environment
-    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "basic_pitch");
+    // Initialize ONNX Runtime environment with ERROR level to suppress schema warnings
+    Ort::Env env(ORT_LOGGING_LEVEL_ERROR, "basic_pitch");
 
     // Set session options (use defaults)
     Ort::SessionOptions session_options;
@@ -162,4 +162,97 @@ basic_pitch::InferenceResult basic_pitch::ort_inference(const float *mono_audio,
 
     return InferenceResult{unwrapped_notes, unwrapped_onsets,
                            unwrapped_contours};
+}
+
+basic_pitch::InferenceResult
+basic_pitch::ort_inference_with_session(Ort::Session &session, const std::vector<float> &mono_audio)
+{
+    return ort_inference_with_session(session, mono_audio.data(), mono_audio.size());
+}
+
+basic_pitch::InferenceResult basic_pitch::ort_inference_with_session(Ort::Session &session, const float *mono_audio, int length)
+{
+    // Constants for processing; overlap 30 frames
+    const int chunk_size = AUDIO_N_SAMPLES;
+    int n_overlapping_frames = 30;
+    int overlap_len = n_overlapping_frames * FFT_HOP;
+    int hop_size = AUDIO_N_SAMPLES - overlap_len;
+
+    // Padding the start of the audio (overlap_len / 2 zeros at the start)
+    std::vector<float> padded_audio(overlap_len / 2, 0.0f);
+    padded_audio.insert(padded_audio.end(), mono_audio, mono_audio + length);
+
+    // Calculate the new length after padding
+    int padded_length = padded_audio.size();
+    int num_chunks = (padded_length + hop_size - 1) / hop_size;
+
+    Ort::AllocatorWithDefaultOptions allocator;
+    std::array<int64_t, 3> input_shape = {num_chunks, chunk_size, 1};
+
+    // Allocate ONNX tensor up front
+    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+        allocator, input_shape.data(), input_shape.size());
+
+    float *input_tensor_data = input_tensor.GetTensorMutableData<float>();
+
+    // Fill the tensor with audio chunks
+    for (int chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx)
+    {
+        int start_sample = chunk_idx * hop_size;
+        int end_sample = std::min(start_sample + chunk_size, padded_length);
+        int actual_chunk_size = end_sample - start_sample;
+
+        // Get pointer to the chunk in the tensor
+        float *chunk_ptr = input_tensor_data + chunk_idx * chunk_size;
+
+        // Copy audio data into this chunk
+        for (int i = 0; i < actual_chunk_size; ++i)
+        {
+            chunk_ptr[i] = padded_audio[start_sample + i];
+        }
+
+        // Zero-pad if necessary
+        for (int i = actual_chunk_size; i < chunk_size; ++i)
+        {
+            chunk_ptr[i] = 0.0f;
+        }
+    }
+
+    // Run inference
+    const char *input_names[] = {"serving_default_input_2:0"};
+    const char *output_names[] = {
+        "StatefulPartitionedCall:1", // note
+        "StatefulPartitionedCall:2", // onset
+        "StatefulPartitionedCall:0"  // contour
+    };
+
+    auto output_tensors = session.Run(Ort::RunOptions{nullptr}, input_names,
+                                     &input_tensor, 1, output_names, 3);
+
+    // Extract output data
+    const auto *notes_data = output_tensors[0].GetTensorData<float>();
+    const auto *onsets_data = output_tensors[1].GetTensorData<float>();
+    const auto *contours_data = output_tensors[2].GetTensorData<float>();
+
+    // Get output tensor shapes
+    auto notes_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
+    auto onsets_shape = output_tensors[1].GetTensorTypeAndShapeInfo().GetShape();
+    auto contours_shape = output_tensors[2].GetTensorTypeAndShapeInfo().GetShape();
+
+    // Create 3D tensors from the output data
+    Eigen::Tensor3dRowMajorXf notes_tensor_3d(notes_shape[0], notes_shape[1], notes_shape[2]);
+    Eigen::Tensor3dRowMajorXf onsets_tensor_3d(onsets_shape[0], onsets_shape[1], onsets_shape[2]);
+    Eigen::Tensor3dRowMajorXf contours_tensor_3d(contours_shape[0], contours_shape[1], contours_shape[2]);
+
+    // Copy data from ONNX tensors to Eigen tensors
+    std::memcpy(notes_tensor_3d.data(), notes_data, notes_tensor_3d.size() * sizeof(float));
+    std::memcpy(onsets_tensor_3d.data(), onsets_data, onsets_tensor_3d.size() * sizeof(float));
+    std::memcpy(contours_tensor_3d.data(), contours_data, contours_tensor_3d.size() * sizeof(float));
+
+    // Unwrap the outputs
+    auto unwrapped_notes = unwrap_output(notes_tensor_3d, length, n_overlapping_frames);
+    auto unwrapped_onsets = unwrap_output(onsets_tensor_3d, length, n_overlapping_frames);
+    auto unwrapped_contours = unwrap_output(contours_tensor_3d, length, n_overlapping_frames);
+
+    return {unwrapped_notes, unwrapped_onsets, unwrapped_contours};
 }

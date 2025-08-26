@@ -9,6 +9,7 @@
 #include <string>
 #include <unsupported/Eigen/CXX11/Tensor>
 #include <vector>
+#include <onnxruntime_cxx_api.h>
 
 namespace Eigen
 {
@@ -51,6 +52,19 @@ const int TIME_SIGNATURE_DENOMINATOR = 4;
 const int DEFAULT_TPQN = 220; // ticks per quarter note
 };                            // namespace constants
 
+// Configuration struct for adjustable parameters
+struct BasicPitchConfig
+{
+    float onset_threshold = constants::ONSET_THRESHOLD;
+    float frame_threshold = constants::FRAME_THRESHOLD;
+    float min_frequency = constants::ANNOTATIONS_BASE_FREQUENCY;
+    float max_frequency = 4186.0f; // C8 on piano
+    int min_note_length = constants::MIN_NOTE_LEN;
+    float tempo_bpm = constants::MIDI_TEMPO_BPM;
+    bool use_melodia_trick = true;
+    bool include_pitch_bends = true;
+};
+
 struct InferenceResult
 {
     Eigen::Tensor2dXf notes;
@@ -60,6 +74,8 @@ struct InferenceResult
 
 InferenceResult ort_inference(const std::vector<float> &mono_audio);
 InferenceResult ort_inference(const float *mono_audio, int length);
+InferenceResult ort_inference_with_session(Ort::Session &session, const std::vector<float> &mono_audio);
+InferenceResult ort_inference_with_session(Ort::Session &session, const float *mono_audio, int length);
 
 struct NoteEvent
 {
@@ -80,8 +96,7 @@ struct NoteEvent
 };
 
 std::vector<uint8_t> convert_to_midi(const InferenceResult &inference_result,
-                                     const bool use_melodia_trick = true,
-                                     const bool include_pitch_bends = true);
+                                     const BasicPitchConfig &config = BasicPitchConfig{});
 } // namespace basic_pitch
 
 #endif // BASIC_PITCH_HPP

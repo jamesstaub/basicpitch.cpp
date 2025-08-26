@@ -15,7 +15,7 @@
 using namespace basic_pitch::constants;
 
 static std::vector<std::pair<int, int>>
-find_peaks(const Eigen::Tensor2dXf &onsets)
+find_peaks(const Eigen::Tensor2dXf &onsets, float onset_threshold)
 {
     std::vector<std::pair<int, int>> peaks;
 
@@ -29,7 +29,7 @@ find_peaks(const Eigen::Tensor2dXf &onsets)
         for (int f = 0; f < n_freqs; ++f)
         {
             // Check if the current element is a peak and exceeds the threshold
-            if (onsets(t, f) > ONSET_THRESHOLD &&
+            if (onsets(t, f) > onset_threshold &&
                 onsets(t, f) > onsets(t - 1, f) &&
                 onsets(t, f) > onsets(t + 1, f))
             {
@@ -275,8 +275,7 @@ drop_overlapping_pitch_bends(std::vector<basic_pitch::NoteEvent> &note_events)
 // Main function to convert frames and onsets to note events
 static std::vector<basic_pitch::NoteEvent>
 output_to_notes_polyphonic(const basic_pitch::InferenceResult &inference_result,
-                           const bool use_melodia_trick,
-                           const bool include_pitch_bends)
+                           const basic_pitch::BasicPitchConfig &config)
 {
 
     int n_times_onsets = inference_result.onsets.dimension(0);
@@ -288,7 +287,7 @@ output_to_notes_polyphonic(const basic_pitch::InferenceResult &inference_result,
     std::vector<basic_pitch::NoteEvent> note_events;
 
     // Find peaks in the onsets
-    auto peaks = find_peaks(inference_result.onsets);
+    auto peaks = find_peaks(inference_result.onsets, config.onset_threshold);
 
     // reverse sort the peaks by onset value
     // std::sort(filtered_peaks.begin(), filtered_peaks.end(),
@@ -304,7 +303,7 @@ output_to_notes_polyphonic(const basic_pitch::InferenceResult &inference_result,
         // Find the point where the note energy drops below the threshold
         while (i < n_times_onsets - 1 && k < ENERGY_TOL)
         {
-            if (remaining_energy(i, freq_idx) < FRAME_THRESHOLD)
+            if (remaining_energy(i, freq_idx) < config.frame_threshold)
             {
                 k++;
             }
@@ -316,7 +315,7 @@ output_to_notes_polyphonic(const basic_pitch::InferenceResult &inference_result,
         }
         i -= k; // Adjust index
 
-        if (i - note_start_idx <= MIN_NOTE_LEN)
+        if (i - note_start_idx <= config.min_note_length)
             continue; // Skip short notes
 
         // Clear energy in the current frequency band
@@ -341,7 +340,7 @@ output_to_notes_polyphonic(const basic_pitch::InferenceResult &inference_result,
                                  amplitude, std::nullopt);
     }
 
-    if (use_melodia_trick)
+    if (config.use_melodia_trick)
     {
         // get matrixxf of remaining_energy, frames to apply melodia trick
         Eigen::MatrixXf remaining_energy_mat = Eigen::Map<Eigen::MatrixXf>(
@@ -349,11 +348,11 @@ output_to_notes_polyphonic(const basic_pitch::InferenceResult &inference_result,
             remaining_energy.dimension(1));
         Eigen::MatrixXf frames_mat = Eigen::Map<Eigen::MatrixXf>(
             frames.data(), frames.dimension(0), frames.dimension(1));
-        apply_melodia_trick(remaining_energy_mat, frames_mat, FRAME_THRESHOLD,
-                            ENERGY_TOL, MIN_NOTE_LEN, note_events);
+        apply_melodia_trick(remaining_energy_mat, frames_mat, config.frame_threshold,
+                            ENERGY_TOL, config.min_note_length, note_events);
     }
 
-    if (include_pitch_bends)
+    if (config.include_pitch_bends)
     {
         add_pitch_bends(inference_result.contours, note_events);
     }
@@ -503,8 +502,7 @@ note_events_to_midi(const std::vector<basic_pitch::NoteEvent> &note_events,
 
 std::vector<uint8_t> basic_pitch::convert_to_midi(
     const basic_pitch::InferenceResult &inference_result,
-    const bool use_melodia_trick,  // defaults to true
-    const bool include_pitch_bends // defaults to false
+    const BasicPitchConfig &config
 )
 {
     // Process the unwrapped notes and onsets to detect note events
@@ -512,10 +510,9 @@ std::vector<uint8_t> basic_pitch::convert_to_midi(
     std::cout << "output_to_notes_polyphonic" << std::endl;
 
     std::vector<basic_pitch::NoteEvent> note_events =
-        output_to_notes_polyphonic(inference_result, use_melodia_trick,
-                                   include_pitch_bends);
+        output_to_notes_polyphonic(inference_result, config);
 
-    if (include_pitch_bends)
+    if (config.include_pitch_bends)
     {
         // Drop pitch bends from overlapping notes
         drop_overlapping_pitch_bends(note_events);
