@@ -240,9 +240,21 @@ basic_pitch::InferenceResult basic_pitch::ort_inference_with_session(Ort::Sessio
     auto contours_shape = output_tensors[2].GetTensorTypeAndShapeInfo().GetShape();
 
     // Create 3D tensors from the output data
-    Eigen::Tensor3dRowMajorXf notes_tensor_3d(notes_shape[0], notes_shape[1], notes_shape[2]);
-    Eigen::Tensor3dRowMajorXf onsets_tensor_3d(onsets_shape[0], onsets_shape[1], onsets_shape[2]);
-    Eigen::Tensor3dRowMajorXf contours_tensor_3d(contours_shape[0], contours_shape[1], contours_shape[2]);
+    Eigen::Tensor3dRowMajorXf notes_tensor_3d(
+        static_cast<long>(notes_shape[0]),
+        static_cast<long>(notes_shape[1]),
+        static_cast<long>(notes_shape[2])
+    );
+    Eigen::Tensor3dRowMajorXf onsets_tensor_3d(
+        static_cast<long>(onsets_shape[0]),
+        static_cast<long>(onsets_shape[1]),
+        static_cast<long>(onsets_shape[2])
+    );
+    Eigen::Tensor3dRowMajorXf contours_tensor_3d(
+        static_cast<long>(contours_shape[0]),
+        static_cast<long>(contours_shape[1]),
+        static_cast<long>(contours_shape[2])
+    );
 
     // Copy data from ONNX tensors to Eigen tensors
     std::memcpy(notes_tensor_3d.data(), notes_data, notes_tensor_3d.size() * sizeof(float));

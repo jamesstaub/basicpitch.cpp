@@ -15,4 +15,6 @@ python3 ./vendor/onnxruntime/tools/ci_build/build.py \
 --skip_tests \
 --enable_wasm_simd \
 --enable_wasm_exception_throwing_override \
---disable_exceptions
+--disable_exceptions \
+--cmake_extra_defines \
+    CMAKE_POLICY_VERSION_MINIMUM=3.5

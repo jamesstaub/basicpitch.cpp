@@ -11,7 +11,14 @@ cli-debug:
 	cmake --build build/build-cli -- -j16
 
 wasm:
+	@if [ ! -f $(EMSDK_ENV_PATH) ]; then \
+		echo "Error: emsdk not found at $(EMSDK_ENV_PATH)"; \
+		echo "Please run: git clone https://github.com/emscripten-core/emsdk.git && cd emsdk && ./emsdk install latest && ./emsdk activate latest"; \
+		exit 1; \
+	fi
 	@/bin/bash -c 'source $(EMSDK_ENV_PATH) && \
+		echo "Emscripten environment loaded" && \
+		which emcmake && \
 		emcmake cmake -S src_wasm -B build/build-wasm -DCMAKE_BUILD_TYPE=Release \
 		&& cmake --build build/build-wasm -- -j16'
 

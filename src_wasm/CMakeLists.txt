@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 
 project(basicpitch.cpp)
 enable_testing()
@@ -25,6 +25,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/onnxruntime/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../ort-model/model)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../src)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/eigen)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/onnxruntime/include/onnxruntime/core/session)
 
 set(COMMON_LINK_FLAGS "-s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=256MB -s MAXIMUM_MEMORY=4GB -s STACK_SIZE=16MB -s MODULARIZE=1 -s 'EXPORTED_RUNTIME_METHODS=[\"FS\",\"getValue\",\"setValue\",\"HEAPF32\",\"HEAP8\",\"HEAPU8\",\"wasmMemory\"]' -s ERROR_ON_UNDEFINED_SYMBOLS=0 -s ASSERTIONS=1")
 

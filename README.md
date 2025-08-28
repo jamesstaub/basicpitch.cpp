@@ -1,23 +1,59 @@
 # basicpitch.cpp
 
-C++20 inference for the [Spotify basic-pitch](https://github.com/spotify/basic-pitch) automatic music transcription/MIDI generator neural network with ONNXRuntime, Eigen, and libremidi. Demo apps are provided for WebAssembly/Emscripten and a cli app.
+A C++20 implementation of [Spotify's BasicPitch](https://github.com/spotify/basic-pitch) automatic music transcription with enhanced features including daemon mode, full parameter control, and Node for Max integration.
 
-I use [ONNXRuntime](https://github.com/microsoft/onnxruntime) and scripts from the excellent [ort-builder](https://github.com/olilarkin/ort-builder) project to implement the neural network inference like so:
-* Convert the ONNX model to ORT (onnxruntime)
-* Include only the operations and types needed for the specific neural network, cutting down code size
-* Compile the model weights to a .c and .h file to include it in the built binaries
+## Key Features
 
-After the neural network inference, I use [libremidi](https://github.com/celtera/libremidi) to replicate the end-to-end MIDI file creation of the real basic-pitch project. I didn't run any official measurements but the WASM demo site is **much faster** than Spotify's own [web demo](https://basicpitch.spotify.com/).
+### 🚀 **Daemon Mode for Fast Inference**
+- **Persistent model loading** - Load ONNX model once, reuse for multiple files
+- **10x+ performance improvement** - No model reload overhead between requests
+- **Command interface** - Process files via stdin commands: `process "input.wav" "output_dir"`
 
-## Project design
+### 🎛️ **Complete Parameter Control**
+All BasicPitch parameters are now configurable via CLI flags:
 
-* [ort-model](./ort-model) contains the model in ONNX form, ORT form, and the generated h and c file
-* [scripts](./scripts) contain the ORT model build scripts
-* [src](./src) is the shared inference and MIDI creation code
-* [src_wasm](./src_wasm) is the main WASM function, used in the web demo
-* [src_cli](./src_cli) is a Linux cli app (for debugging purposes) that uses [libnyquist](https://github.com/ddiakopoulos/libnyquist) to load the audio files
-* [vendor](./vendor) contains third-party/vendored libraries
-* [web](./web) contains basic HTML/Javascript code to host the WASM demo
+- **onset-threshold** (0.0-1.0) - Note detection sensitivity
+- **frame-threshold** (0.0-1.0) - Note continuation sensitivity  
+- **min-frequency** / **max-frequency** (20-8000 Hz) - Frequency range limits
+- **min-note-length** (0.01-10.0 sec) - Minimum note duration
+- **tempo-bpm** (60-200) - MIDI file tempo
+- **use-melodia-trick** (--no-melodia-trick) - Enhanced pitch tracking
+- **include-pitch-bends** (--no-pitch-bends) - MIDI pitch bend events
+
+### 🎵 **Node for Max Integration**
+- **Real-time processing** within Max/MSP environment
+- **Native Max message handlers** - `path`, `preprocess`, `flags`, `help`
+- **Parameter validation** with proper ranges and error handling
+- **Audio format support** - Auto-conversion via ffmpeg for `.mp3`, `.m4a`, etc.
+- **Status outlets** - Real-time feedback: `processing_started`, `processing_complete`
+
+### 🌐 **Enhanced Web Demo**
+- **Interactive parameter controls** - Real-time sliders for all settings
+- **Large file support** - Fixed memory issues for files >20M samples
+- **Drag & drop interface** - Upload audio files directly in browser
+- **Cross-browser compatibility** - Works in Chrome, Firefox, Safari
+
+
+
+## Technical Details
+
+Uses [ONNXRuntime](https://github.com/microsoft/onnxruntime) and scripts from the excellent [ort-builder](https://github.com/olilarkin/ort-builder) project to implement the neural network inference:
+
+- Convert the ONNX model to ORT (onnxruntime)
+- Include only the operations and types needed for the specific neural network, cutting down code size
+- Compile the model weights to a .c and .h file to include it in the built binaries
+
+After the neural network inference, uses [libremidi](https://github.com/celtera/libremidi) to replicate the end-to-end MIDI file creation of the real basic-pitch project. The WASM demo site is **much faster** than Spotify's own [web demo](https://basicpitch.spotify.com/).
+
+## Project Structure
+
+- [ort-model](./ort-model) contains the model in ONNX form, ORT form, and the generated h and c file
+- [scripts](./scripts) contain the ORT model build scripts
+- [src](./src) is the shared inference and MIDI creation code
+- [src_wasm](./src_wasm) is the main WASM function, used in the web demo
+- [src_cli](./src_cli) contains CLI and daemon applications that use [libnyquist](https://github.com/ddiakopoulos/libnyquist) to load audio files
+- [vendor](./vendor) contains third-party/vendored libraries
+- [web](./web) contains HTML/Javascript code for the WASM demo
 
 ## Usage
 
@@ -70,49 +106,121 @@ Use the website:
 
 ## Build instructions
 
-(Only tested on Linux, Pop!\_OS 22.04). I'm assuming you have a typical C/C++ toolchain e.g. make, cmake, gcc/g++, for your OS. You also need to set up the [Emscripten SDK](https://github.com/emscripten-core/emsdk) for compiling to WebAssembly.
+Tested on macOS and Linux. You need a typical C/C++ toolchain (make, cmake, gcc/g++). For WebAssembly builds, you also need the [Emscripten SDK](https://github.com/emscripten-core/emsdk).
 
-Clone the repo with submodules: 
-```
-$ git clone --recurse-submodules https://github.com/sevagh/demucs.cpp
+Clone the repo with submodules:
+```bash
+git clone --recurse-submodules https://github.com/sevagh/basicpitch.cpp
 ```
 
 Create a Python venv (or conda env) and install the requirements:
-```
-$ pip install -r ./scripts/requirements.txt
+```bash
+pip install -r ./scripts/requirements.txt
 ```
 
 Activate your venv and run the ONNXRuntime builder scripts:
-```
-$ activate my-env
-$ ./scripts/build-ort-linux.sh
-$ ./scripts/build-ort-wasm.sh
+```bash
+# Activate your environment
+source my-env/bin/activate  # or conda activate my-env
+
+# Build ONNX Runtime for CLI
+./scripts/build-ort-linux.sh
+
+# Build ONNX Runtime for WASM (optional, for web demo)
+./scripts/build-ort-wasm.sh
 ```
 
 Check the outputs:
-```
-$ ls build/build-ort-*/MinSizeRel/libonnx.a
-build/build-ort-linux/MinSizeRel/libonnx.a  build/build-ort-wasm/MinSizeRel/libonnx.a
-```
-
-**Optional:** if you want to re-convert the ONNX model to ORT in the ort-model directory, use `scripts/convert-model-to-ort.sh ./ort-models/model.onnx`. The ONNX model is copied from `./vendor/basic-pitch/basic_pitch/saved_models/icassp_2022/nmp.onnx`
-
-Build cli app:
-```
-$ make cli
-$ ls build/build-cli/basicpitch
-build/build-cli/basicpitch
+```bash
+ls build/build-ort-*/MinSizeRel/libonnx*.a
 ```
 
-For WebAssembly, first, set up the [Emscripten SDK](https://github.com/emscripten-core/emsdk). Then, build the WASM app with your EMSDK env script:
-```
-$ export EMSDK_ENV_PATH=/path/to/emsdk/emsdk_env.sh
-$ make wasm
-$ ls build/build-wasm/basicpitch.wasm
-build/build-wasm/basicpitch.wasm
+### CLI Build
+
+```bash
+make cli
+
+# Test the CLI
+./build/build-cli/basicpitch ~/Downloads/audio.wav ./midi-output
 ```
 
-This also copies the updated `basicpitch.{wasm,js}` to the `./web` directory.
+### CLI with Parameters
+
+```bash
+# Example with custom parameters
+./build/build-cli/basicpitch \
+  --onset-threshold 0.8 \
+  --frame-threshold 0.2 \
+  --tempo-bpm 140 \
+  --no-melodia-trick \
+  ~/Downloads/audio.wav ./midi-output
+```
+
+### Daemon Mode
+
+```bash
+# Build daemon
+make cli  # Same build includes both basicpitch and basicpitch_daemon
+
+# Run daemon
+./build/build-cli/basicpitch_daemon --daemon ./temp-midi
+
+# In another terminal, send commands via stdin:
+echo 'process "input.wav" "output_dir"' | ./build/build-cli/basicpitch_daemon --daemon ./temp-midi
+
+# Or run interactively:
+./build/build-cli/basicpitch_daemon --daemon ./temp-midi
+# Then type: process "input.wav" "output_dir"
+```
+
+### WebAssembly Build
+
+First, install the [Emscripten SDK](https://github.com/emscripten-core/emsdk):
+
+```bash
+# Clone emsdk (if not already present)
+git clone https://github.com/emscripten-core/emsdk.git
+cd emsdk
+
+# Install the latest stable version
+./emsdk install latest
+
+# Activate the latest version
+./emsdk activate latest
+
+# Source the environment (adds emcc, emcmake, etc. to your PATH)
+source ./emsdk_env.sh
+
+# Go back to your project root
+cd ..
+```
+
+Build the WASM demo:
+```bash
+make wasm
+
+# Serve the web demo
+cd web && python -m http.server 8000
+# Open http://localhost:8000 in browser
+```
+
+### Node for Max Integration
+
+The Node for Max integration requires the daemon build:
+
+1. **Build the daemon**: `make cli`
+2. **Install Node for Max**: Place `basic-pitch-n4m.js` in your Max project
+3. **Create Max object**: `[node.script basic-pitch-n4m.js]`
+4. **Install ffmpeg**: `brew install ffmpeg` (for audio format support)
+
+#### Usage in Max/MSP:
+
+```
+path /Users/username/audio.wav        // Process audio file
+preprocess /Users/username/audio.mp3  // Process with format conversion
+flags onset-threshold 0.8 tempo-bpm 140  // Set parameters
+help                                  // Show available commands
+```
 
 ## Development Notes & Troubleshooting
 
@@ -199,3 +307,60 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fno-exceptions -fno-rtti -DNDEBUG")
 ```
 
 This work ensures the web demo can handle realistic audio file sizes while maintaining stability and performance.
+
+## Emscripten SDK (emsdk) Setup for WASM
+
+To build the WebAssembly (WASM) version, you must install and activate the Emscripten SDK:
+
+```bash
+# Clone emsdk (if not already present)
+git clone https://github.com/emscripten-core/emsdk.git
+cd emsdk
+
+# Install the latest stable version
+./emsdk install latest
+
+# Activate the latest version
+./emsdk activate latest
+
+# Source the environment (adds emcc, emcmake, etc. to your PATH)
+source ./emsdk_env.sh
+
+# Go back to your project root
+cd ..
+```
+
+## Build ONNX Runtime for WASM
+
+Before building the WASM target, you must build ONNX Runtime for WebAssembly:
+
+**NOTE**: I had to manually modify `vendor/onnxruntime/cmake/external/eigen.cmake` to get eigen to install. (removing `URL_HASH` to skip hash check)
+
+```        
+FetchContent_Declare(
+        eigen
+        URL https://gitlab.com/libeigen/eigen/-/archive/e7248b26a1ed53fa030c5c459f7ea095dfd276ac/eigen-e7248b26a1ed53fa030c5c459f7ea095dfd276ac.zip
+
+    )
+```
+
+
+
+
+```bash
+./scripts/build-ort-wasm.sh
+```
+
+This will generate the required static library and headers:
+- `build/build-ort-wasm/MinSizeRel/libonnxruntime_webassembly.a`
+- `vendor/onnxruntime/include/onnxruntime_cxx_api.h`
+
+## Build WASM Target
+
+After emsdk is activated and ONNX Runtime WASM is built, you can build the WASM target:
+
+```bash
+make wasm
+```
+
+If you see errors about missing `emcmake` or ONNX headers/libraries, repeat the above steps to ensure emsdk is activated and ONNX Runtime WASM is built.

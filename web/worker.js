@@ -1,4 +1,3 @@
-let wasmModule;
 let loadedModule;
 
 onmessage = function(e) {
@@ -11,117 +10,91 @@ onmessage = function(e) {
             return;
         }
 
-        const inputData = new Float32Array(e.data.inputData); // Convert back from ArrayBuffer
-        const length = e.data.length;  // Use the correct length
+        // Convert audio data back from ArrayBuffer
+        const inputData = new Float32Array(e.data.audioData);
+        const length = e.data.length;
 
-        console.log('Running inference with WASM...');
-        console.log('length:', length);
-        console.log('Available module properties:', Object.keys(loadedModule));
-        console.log('HEAPF32 available:', !!loadedModule.HEAPF32);
-        console.log('HEAPU8 available:', !!loadedModule.HEAPU8);
-        console.log('setValue available:', !!loadedModule.setValue);
-
-        // Allocate memory in WASM and copy input data into the WASM memory
-        // Ensure 16-byte alignment for better performance and to avoid alignment faults
-        const audioSizeBytes = inputData.length * inputData.BYTES_PER_ELEMENT;
-        const alignedSize = Math.ceil(audioSizeBytes / 16) * 16; // Round up to nearest 16-byte boundary
-        const audioPointer = loadedModule._malloc(alignedSize);
-        
-        console.log('Allocated', alignedSize, 'bytes (aligned) for', audioSizeBytes, 'bytes of audio data');
-        console.log('Audio pointer:', audioPointer, 'is aligned:', (audioPointer % 16 === 0));
-        
-        // Now that we should have HEAPF32 available, use it directly
-        if (loadedModule.HEAPF32) {
-            console.log('Using HEAPF32 for memory access');
-            console.log('Audio pointer:', audioPointer, 'Audio size in bytes:', inputData.length * 4);
-            console.log('HEAPF32 buffer size:', loadedModule.HEAPF32.buffer.byteLength);
-            
-            // Make sure the pointer is properly aligned for float access (divisible by 4)
-            const floatOffset = audioPointer >> 2; // Divide by 4 to get float index
-            console.log('Float offset:', floatOffset, 'Input length:', inputData.length);
-            console.log('Required end position:', floatOffset + inputData.length);
-            console.log('HEAPF32 length:', loadedModule.HEAPF32.length);
-            
-            // Check if we have enough space
-            if (floatOffset + inputData.length > loadedModule.HEAPF32.length) {
-                console.error('Not enough WASM memory allocated');
-                console.error('Required:', floatOffset + inputData.length, 'Available:', loadedModule.HEAPF32.length);
-                postMessage({ msg: 'PROCESSING_FAILED', error: 'Insufficient WASM memory' });
-                return;
-            }
-            
-            // Copy data using subarray to avoid buffer alignment issues
-            const wasmView = loadedModule.HEAPF32.subarray(floatOffset, floatOffset + inputData.length);
-            wasmView.set(inputData);
-            console.log('Audio data copied successfully');
-        } else {
-            console.error('HEAPF32 still not available!');
-            postMessage({ msg: 'PROCESSING_FAILED', error: 'HEAPF32 not available' });
+        if (length === 0) {
+            console.error('Received empty audio buffer');
+            postMessage({ msg: 'PROCESSING_FAILED', error: 'Empty audio buffer' });
             return;
         }
 
-        // Allocate memory for MIDI data pointer and size
-        const midiDataPointer = loadedModule._malloc(4);  // Allocate 4 bytes for the pointer (uint8_t*)
-        const midiSizePointer = loadedModule._malloc(4);  // Allocate 4 bytes for the size (int)
+        console.log('Running inference with WASM...');
+        console.log('Audio length:', length);
+        console.log('Available module properties:', Object.keys(loadedModule));
+        console.log('HEAPF32 available:', !!loadedModule.HEAPF32);
 
-        // Call the WASM function with the audio buffer, length, and pointers for the MIDI data and size
+        // Allocate memory for audio buffer (16-byte aligned)
+        const audioSizeBytes = inputData.length * 4;
+        const alignedSize = Math.ceil(audioSizeBytes / 16) * 16;
+        const audioPointer = loadedModule._malloc(alignedSize);
+
+        const floatOffset = audioPointer >> 2;
+        if (floatOffset + inputData.length > loadedModule.HEAPF32.length) {
+            console.error('Insufficient WASM memory for audio data');
+            postMessage({ msg: 'PROCESSING_FAILED', error: 'Insufficient WASM memory' });
+            loadedModule._free(audioPointer);
+            return;
+        }
+
+        // Copy audio data into WASM memory
+        loadedModule.HEAPF32.set(inputData, floatOffset);
+
+        // Allocate memory for MIDI data pointer and size
+        const midiDataPointer = loadedModule._malloc(4);
+        const midiSizePointer = loadedModule._malloc(4);
+
+        // Extract configuration or use defaults
+        const config = e.data.config || {};
+        const onset_threshold = config.onset_threshold ?? 0.5;
+        const frame_threshold = config.frame_threshold ?? 0.3;
+        const min_frequency = config.min_frequency ?? 27.5;
+        const max_frequency = config.max_frequency ?? 4186.0;
+        const min_note_length = config.min_note_length ?? 0.127;
+        const tempo_bpm = config.tempo_bpm ?? 120.0;
+        const use_melodia_trick = config.use_melodia_trick ? 1 : 0;
+        const include_pitch_bends = config.include_pitch_bends ? 1 : 0;
+
         try {
-            console.log('Calling _convertToMidi with audio data...');
-            loadedModule._convertToMidi(audioPointer, length, midiDataPointer, midiSizePointer);
-            console.log('_convertToMidi completed successfully');
+            loadedModule._convertToMidi(
+                audioPointer,
+                length,
+                midiDataPointer,
+                midiSizePointer,
+                onset_threshold,
+                frame_threshold,
+                min_frequency,
+                max_frequency,
+                min_note_length,
+                tempo_bpm,
+                use_melodia_trick,
+                include_pitch_bends
+            );
         } catch (error) {
             console.error('Error during WASM inference:', error);
-            postMessage({ msg: 'PROCESSING_FAILED', error: 'WASM inference failed: ' + error.message });
-            // Clean up allocated memory
+            postMessage({ msg: 'PROCESSING_FAILED', error: error.message });
             loadedModule._free(audioPointer);
             loadedModule._free(midiDataPointer);
             loadedModule._free(midiSizePointer);
             return;
         }
 
-        // Retrieve the MIDI data pointer and size from WASM memory
-        const midiData = loadedModule.getValue(midiDataPointer, 'i32');  // Get the pointer to MIDI data
-        const midiSize = loadedModule.getValue(midiSizePointer, 'i32'); // Get the size of the MIDI data
+        // Retrieve MIDI data pointer and size
+        const midiData = loadedModule.getValue(midiDataPointer, 'i32');
+        const midiSize = loadedModule.getValue(midiSizePointer, 'i32');
 
-        // If valid MIDI data was returned
         if (midiData !== 0 && midiSize > 0) {
-            // Access the MIDI data from WASM memory using HEAPU8
-            const midiBytes = new Uint8Array(midiSize);
-            if (loadedModule.HEAPU8) {
-                const sourceBytes = new Uint8Array(loadedModule.HEAPU8.buffer, midiData, midiSize);
-                midiBytes.set(sourceBytes);
-            } else {
-                console.error('HEAPU8 not available for MIDI data');
-                postMessage({ msg: 'PROCESSING_FAILED', error: 'HEAPU8 not available' });
-                return;
-            }
-
-            console.log('MIDI data extracted:', midiSize, 'bytes');
-            console.log('First 16 bytes:', Array.from(midiBytes.slice(0, 16), b => b.toString(16).padStart(2, '0')).join(' '));
-
-            // Create a Blob from the MIDI data
+            const midiBytes = new Uint8Array(loadedModule.HEAPU8.buffer, midiData, midiSize);
             const blob = new Blob([midiBytes], { type: 'audio/midi' });
-
-            // Optionally, create a URL from the Blob
-            const blobUrl = URL.createObjectURL(blob);
-
-            // Send the Blob (or the Blob URL) back to the main thread
-            postMessage({
-                msg: 'PROCESSING_DONE',
-                blob: blob,  // Send the Blob directly
-                blobUrl: blobUrl // Alternatively, send the Blob URL
-            });
-
-            // Free the memory allocated for the MIDI data in WASM
+            postMessage({ msg: 'PROCESSING_DONE', blob });
             loadedModule._free(midiData);
         } else {
-            console.error('Failed to generate MIDI data.');
-            console.log('midiData:', midiData);
-            console.log('midiSize:', midiSize);
-            postMessage({ msg: 'PROCESSING_FAILED' });
+            console.error('Failed to generate MIDI data', { midiData, midiSize });
+            postMessage({ msg: 'PROCESSING_FAILED', error: 'Invalid MIDI output' });
         }
 
-        // Free the memory allocated in WASM for the input audio and the MIDI pointer/size
+        // Free allocated WASM memory
         loadedModule._free(audioPointer);
         loadedModule._free(midiDataPointer);
         loadedModule._free(midiSizePointer);
@@ -129,22 +102,15 @@ onmessage = function(e) {
 };
 
 function loadWASMModule(scriptName) {
-    //importScripts(scriptName);  // Load the WASM glue code
-    //<script src="basicpitch.js?v=<?= time() ?>"></script>
-    importScripts(`${scriptName}?v=${new Date().getTime()}`);  // Load the WASM glue code w/ cache busting
+    importScripts(`${scriptName}?v=${Date.now()}`);
+    const modulePromise = libbasicpitch(); // WASM glue code creates this
 
-    // Initialize the WASM module (which should set `Module`)
-    wasmModule = libbasicpitch(); // Module is created in the glue code
-
-    wasmModule.then((loaded_module) => {
-        console.log('WASM module loaded:', loaded_module);
-        console.log('Available properties:', Object.keys(loaded_module));
-        console.log('HEAPF32 available:', !!loaded_module.HEAPF32);
-        console.log('HEAP8 available:', !!loaded_module.HEAP8);
-        console.log('HEAPU8 available:', !!loaded_module.HEAPU8);
-
+    modulePromise.then(mod => {
+        loadedModule = mod;
+        console.log('WASM module loaded:', Object.keys(loadedModule));
         postMessage({ msg: 'WASM_READY' });
-
-        loadedModule = loaded_module;
+    }).catch(err => {
+        console.error('Failed to load WASM module', err);
+        postMessage({ msg: 'PROCESSING_FAILED', error: 'WASM module load failed' });
     });
 }
